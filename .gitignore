@@ -1,0 +1,16 @@
+# Logs
+*.log
+
+# Backup archives
+*.tar
+*.tar.gz
+*.tgz
+
+# Temp files
+*.tmp
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
