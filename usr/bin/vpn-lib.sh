@@ -15,44 +15,78 @@ set -o pipefail
 trap 'echo; echo "[INFO] Dibatalkan."; exit 130' INT
 
 # -----------------------------
-# Styling (colors) & utilities
+# UI / Display module (tampilan)
 # -----------------------------
-# Gunakan tput agar kompatibel dengan berbagai terminal.
-if command -v tput >/dev/null 2>&1; then
-  C_RESET="$(tput sgr0)"
-  C_BOLD="$(tput bold)"
-  C_DIM="$(tput dim)"
-  C_RED="$(tput setaf 1)"
-  C_GREEN="$(tput setaf 2)"
-  C_YELLOW="$(tput setaf 3)"
-  C_BLUE="$(tput setaf 4)"
-  C_MAGENTA="$(tput setaf 5)"
-  C_CYAN="$(tput setaf 6)"
-  C_WHITE="$(tput setaf 7)"
-else
-  C_RESET='' C_BOLD='' C_DIM='' C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_MAGENTA='' C_CYAN='' C_WHITE=''
+# Memisahkan UI dari logic: semua renderer berada di display.sh.
+_vpn_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [[ -f "${_vpn_lib_dir}/display.sh" ]]; then
+  # shellcheck disable=SC1090
+  source "${_vpn_lib_dir}/display.sh"
 fi
 
-# Clear screen yang aman.
-cls() { clear || printf '\033c'; }
-
-# Pause (tekan enter).
-pause() {
-  echo
-  read -r -p "Tekan ENTER untuk kembali..." _
-}
-
-# Print status ON/OFF dengan warna.
-fmt_onoff() {
-  local status="$1"
-  if [[ "$status" == "ON" ]]; then
-    printf "%s%s%s" "$C_GREEN" "$status" "$C_RESET"
+# -----------------------------
+# Styling (colors)
+# -----------------------------
+# Fallback jika display.sh tidak tersedia.
+if [[ -z "${C_RESET-}" ]]; then
+  if command -v tput >/dev/null 2>&1; then
+    C_RESET="$(tput sgr0)"
+    C_BOLD="$(tput bold)"
+    C_DIM="$(tput dim)"
+    C_RED="$(tput setaf 1)"
+    C_GREEN="$(tput setaf 2)"
+    C_YELLOW="$(tput setaf 3)"
+    C_BLUE="$(tput setaf 4)"
+    C_MAGENTA="$(tput setaf 5)"
+    C_CYAN="$(tput setaf 6)"
+    C_WHITE="$(tput setaf 7)"
   else
-    printf "%s%s%s" "$C_RED" "$status" "$C_RESET"
+    C_RESET='' C_BOLD='' C_DIM='' C_RED='' C_GREEN='' C_YELLOW='' C_BLUE='' C_MAGENTA='' C_CYAN='' C_WHITE=''
   fi
+fi
+
+# -----------------------------
+# Fallback UI helpers (jika display.sh tidak ikut terinstall)
+# -----------------------------
+if ! declare -F cls >/dev/null 2>&1; then
+  cls() { clear || printf '\033c'; }
+fi
+
+if ! declare -F pause >/dev/null 2>&1; then
+  pause() {
+    echo
+    read -r -p "Tekan ENTER untuk kembali..." _
+  }
+fi
+
+if ! declare -F fmt_onoff >/dev/null 2>&1; then
+  fmt_onoff() {
+    local status="$1"
+    if [[ "$status" == "ON" ]]; then
+      printf "%s%s%s" "$C_GREEN" "$status" "$C_RESET"
+    else
+      printf "%s%s%s" "$C_RED" "$status" "$C_RESET"
+    fi
+  }
+fi
+
+# Wrapper API lama.
+print_header() {
+  if declare -F ui_print_header >/dev/null 2>&1; then
+    ui_print_header
+    return 0
+  fi
+
+  cls
+  echo "${C_CYAN}${C_BOLD}VPN ALL-IN-ONE Bash TUI Panel${C_RESET}  |  Ubuntu 20.04 / 22.04"
+  echo "${C_DIM}Gunakan menu bernomor. Tekan CTRL+C untuk keluar.${C_RESET}"
+  echo
 }
 
+# -----------------------------
 # Safe systemctl query: jika unit tidak ada, anggap inactive.
+# -----------------------------
 svc_is_active() {
   local unit="$1"
   if systemctl list-unit-files --type=service --no-legend 2>/dev/null | awk '{print $1}' | grep -qx "${unit}.service"; then
@@ -88,24 +122,6 @@ require_root() {
     echo "Jalankan: sudo bash $0"
     exit 1
   fi
-}
-
-# -----------------------------
-# Header banner ASCII
-# -----------------------------
-print_header() {
-  cls
-  cat <<'BANNER'
- __      _______  _   _      _     _ _       ___  ___  ___
- \ \    / /  __ \| \ | |    | |   (_) |      |  \/  | / _ \
-  \ \  / /| |  \/|  \| |    | |    _| |_ ___ | .  . |/ /_\ \
-   \ \/ / | | __ | . ` |    | |   | | __/ _ \| |\/| ||  _  |
-    \  /  | |_\ \| |\  |    | |___| | || (_) | |  | || | | |
-     \/    \____/\_| \_/    \_____/_|\__\___/\_|  |_/\_| |_/
-BANNER
-  echo "${C_CYAN}${C_BOLD}VPN ALL-IN-ONE Bash TUI Panel${C_RESET}  |  Ubuntu 20.04 / 22.04"
-  echo "${C_DIM}Gunakan menu bernomor. Tekan CTRL+C untuk keluar.${C_RESET}"
-  echo
 }
 
 # -----------------------------
@@ -434,9 +450,17 @@ render_dashboard() {
 
   local svc
   svc="$(get_services_status)"
+
+  if declare -F ui_render_dashboard >/dev/null 2>&1; then
+    ui_render_dashboard "$os" "$cpu_cores" "$ram" "$load" "$uptime" "$ip" "$domain" "$ssh_count" \
+      "$vmess_ws" "$vmess_grpc" "$vless_ws" "$vless_grpc" "$trojan_ws" "$trojan_grpc" "$ss_count" "$svc"
+    return 0
+  fi
+
+  # Fallback layout (jika display.sh tidak tersedia).
+  local svc_ssh svc_xray svc_nginx svc_haproxy svc_dropbear svc_udp svc_noobz svc_wsepro
   IFS='|' read -r svc_ssh svc_xray svc_nginx svc_haproxy svc_dropbear svc_udp svc_noobz svc_wsepro <<<"$svc"
 
-  # Layout dashboard.
   echo "${C_BOLD}${C_BLUE}┌──────────────────────────────────────────────────────────────────────────────┐${C_RESET}"
   printf "%s%s%-78s%s\n" "$C_BOLD" "$C_BLUE" "│ SYSTEM INFORMATION" "$C_RESET"
   echo "${C_BOLD}${C_BLUE}├──────────────────────────────────────────────────────────────────────────────┤${C_RESET}"
