@@ -201,28 +201,57 @@ EOF
 }
 
 do_backup() {
-  # Backup direktori umum konfigurasi VPN/Reverse Proxy.
+  # Backup Xray config dan akun SSH
   print_header
   echo "${C_BOLD}Create Backup${C_RESET}"
   echo
 
   local ts out
   ts="$(date +%Y%m%d-%H%M%S)"
-  out="/root/vpn-backup-${ts}.tar.gz"
+  out="/root/backup/vpn-backup-${ts}.tar.gz"
 
-  # Daftar path yang dibackup (yang ada saja).
-  local paths=()
-  for p in /etc/xray /usr/local/etc/xray /etc/nginx /etc/haproxy /etc/ssh /etc/dropbear /etc/letsencrypt /var/www; do
-    [[ -e "$p" ]] && paths+=("$p")
+  # Buat direktori backup jika belum ada
+  mkdir -p /root/backup
+
+  # Backup Xray config
+  local xray_paths=()
+  for p in /etc/xray /usr/local/etc/xray; do
+    [[ -e "$p" ]] && xray_paths+=("$p")
   done
 
-  if [[ ${#paths[@]} -eq 0 ]]; then
-    echo "Tidak ada direktori konfigurasi yang ditemukan untuk dibackup."
+  # Backup akun SSH (hanya file passwd, shadow, dan home direktori user)
+  local ssh_backup="/tmp/ssh_backup_${ts}"
+  mkdir -p "${ssh_backup}"
+  
+  # Backup file sistem SSH
+  [[ -f /etc/passwd ]] && cp /etc/passwd "${ssh_backup}/"
+  [[ -f /etc/shadow ]] && cp /etc/shadow "${ssh_backup}/"
+  [[ -f /etc/group ]] && cp /etc/group "${ssh_backup}/"
+  
+  # Backup home direktori user (hanya user dengan UID >= 1000)
+  local home_backup="/tmp/home_backup_${ts}"
+  mkdir -p "${home_backup}"
+  while IFS=: read -r uname _ uid _ _ _ shell; do
+    [[ "$uid" -ge 1000 ]] || continue
+    [[ "$uname" != "nobody" ]] || continue
+    [[ "$shell" =~ (nologin|false)$ ]] && continue
+    if [[ -d "/home/$uname" ]]; then
+      cp -r "/home/$uname" "${home_backup}/"
+    fi
+  done < /etc/passwd
+
+  if [[ ${#xray_paths[@]} -eq 0 ]] && [[ ! -d "${ssh_backup}" ]] && [[ ! -d "${home_backup}" ]]; then
+    echo "Tidak ada data yang ditemukan untuk dibackup."
+    rm -rf "${ssh_backup}" "${home_backup}"
     pause
     return 0
   fi
 
-  tar -czf "$out" "${paths[@]}" 2>/dev/null || true
+  # Gabungkan semua ke tar.gz
+  tar -czf "$out" "${xray_paths[@]}" "${ssh_backup}" "${home_backup}" 2>/dev/null || true
+
+  # Bersihkan temporary files
+  rm -rf "${ssh_backup}" "${home_backup}"
 
   echo "${C_GREEN}[OK]${C_RESET} Backup dibuat: $out"
   echo
