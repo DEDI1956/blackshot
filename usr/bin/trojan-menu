@@ -15,12 +15,6 @@ fi
 # -----------------------------
 # Sub-menu: TROJAN (XRAY)
 # -----------------------------
-# Catatan:
-# - Manajemen akun XRAY sangat tergantung pada struktur config yang dipakai
-#   (single config.json / split config / template komentar, dll).
-# - Untuk menjaga script ini aman dan portable, di bawah ini disediakan
-#   placeholder function yang bisa Anda isi sesuai installer XRAY Anda.
-
 trojan_menu() {
   local proto="TROJAN"
   while true; do
@@ -28,16 +22,19 @@ trojan_menu() {
     render_dashboard
 
     cat <<EOF
-${C_BOLD}${C_YELLOW}${proto} MENU (XRAY)${C_RESET}
+${C_BOLD}${C_YELLOW}${proto} MANAGEMENT MENU (XRAY)${C_RESET}
 
+ SERVICE STATUS: $(fmt_onoff "$(svc_is_active xray)")
+
+ MANAGEMENT OPTIONS:
  [1] Add ${proto} Account
  [2] Delete ${proto} Account
  [3] Renew ${proto} Account
  [4] List ${proto} Accounts
 
- [0] Back
+ [0] Back to Main Menu
 
-${C_DIM}Placeholder:${C_RESET}
+${C_DIM}Note:${C_RESET}
 - Implementasikan CRUD akun dengan mengedit /etc/xray/config.json
 - Setelah perubahan, restart XRAY: systemctl restart xray
 EOF
@@ -46,12 +43,12 @@ EOF
     case "$opt" in
       1|2|3|4)
         echo
-        echo "${C_YELLOW}[TODO]${C_RESET} Implementasi ${proto} account management belum diaktifkan."
+        echo "${C_YELLOW}[INFO]${C_RESET} ${proto} account management belum diaktifkan."
         echo "Silakan sesuaikan dengan format config XRAY Anda."
         pause
         ;;
       0) return 0 ;;
-      *) echo "Pilihan tidak valid."; pause ;;
+      *) echo "${C_RED}[ERROR]${C_RESET} Pilihan tidak valid."; pause ;;
     esac
   done
 }

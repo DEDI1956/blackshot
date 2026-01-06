@@ -21,15 +21,18 @@ ssh_menu() {
     render_dashboard
 
     cat <<EOF
-${C_BOLD}${C_YELLOW}SSH MENU${C_RESET}
+${C_BOLD}${C_YELLOW}SSH MANAGEMENT MENU${C_RESET}
 
+ SERVICE STATUS: $(fmt_onoff "$(svc_is_active ssh)")
+
+ MANAGEMENT OPTIONS:
  [1] Add SSH User
  [2] Delete SSH User
  [3] Renew SSH User (Extend Expiry)
  [4] List SSH Users
  [5] Show Logged-in Users (who)
 
- [0] Back
+ [0] Back to Main Menu
 EOF
 
     read -r -p "Select: " opt
@@ -40,90 +43,104 @@ EOF
       4) ssh_list_users ;;
       5) ssh_show_logged_in ;;
       0) return 0 ;;
-      *) echo "Pilihan tidak valid."; pause ;;
+      *) echo "${C_RED}[ERROR]${C_RESET} Pilihan tidak valid."; pause ;;
     esac
   done
 }
 
 ssh_add_user() {
-  # Menambah akun SSH Linux standar (tanpa mengubah konfigurasi daemon).
   print_header
-  echo "${C_BOLD}Add SSH User${C_RESET}"
+  render_dashboard
+  
+  echo "${C_BOLD}${C_YELLOW}ADD SSH USER${C_RESET}"
   echo
 
   local user pass days exp_date
   read -r -p "Username: " user
   if [[ -z "$user" ]]; then
-    echo "Username kosong."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} Username kosong."; pause; return 0
   fi
   if id -u "$user" >/dev/null 2>&1; then
-    echo "User sudah ada."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} User sudah ada."; pause; return 0
   fi
 
   read -r -s -p "Password: " pass
   echo
   read -r -p "Masa aktif (hari): " days
   if ! [[ "$days" =~ ^[0-9]+$ ]]; then
-    echo "Hari harus angka."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} Hari harus angka."; pause; return 0
   fi
 
   exp_date="$(date -d "+${days} days" +%Y-%m-%d)"
 
-  useradd -m -s /bin/bash -e "$exp_date" "$user"
+  useradd -m -s /bin/bash -e "$exp_date" "$user" 2>/dev/null || {
+    echo "${C_RED}[ERROR]${C_RESET} Gagal membuat user."; pause; return 0
+  }
+  
   echo "${user}:${pass}" | chpasswd
 
   echo
-  echo "${C_GREEN}[OK]${C_RESET} User dibuat."
-  echo " Username : $user"
-  echo " Expired  : $exp_date"
+  echo "${C_GREEN}[OK]${C_RESET} User berhasil dibuat."
+  echo " Username : ${C_CYAN}${user}${C_RESET}"
+  echo " Expired  : ${C_CYAN}${exp_date}${C_RESET}"
   pause
 }
 
 ssh_delete_user() {
-  # Menghapus akun SSH.
   print_header
-  echo "${C_BOLD}Delete SSH User${C_RESET}"
+  render_dashboard
+  
+  echo "${C_BOLD}${C_YELLOW}DELETE SSH USER${C_RESET}"
   echo
 
   local user
   read -r -p "Username: " user
   if [[ -z "$user" ]]; then
-    echo "Username kosong."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} Username kosong."; pause; return 0
   fi
   if ! id -u "$user" >/dev/null 2>&1; then
-    echo "User tidak ditemukan."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} User tidak ditemukan."; pause; return 0
   fi
 
-  userdel -r "$user" 2>/dev/null || userdel "$user"
+  echo "${C_YELLOW}[WARN]${C_RESET} User dan semua data home akan dihapus."
+  read -r -p "Lanjutkan? (y/N): " yn
+  if [[ "${yn,,}" != "y" ]]; then
+    echo "Dibatalkan."; pause; return 0
+  fi
+
+  userdel -r "$user" 2>/dev/null || userdel "$user" 2>/dev/null || {
+    echo "${C_RED}[ERROR]${C_RESET} Gagal menghapus user."; pause; return 0
+  }
 
   echo
-  echo "${C_GREEN}[OK]${C_RESET} User dihapus: $user"
+  echo "${C_GREEN}[OK]${C_RESET} User dihapus: ${C_CYAN}${user}${C_RESET}"
   pause
 }
 
 ssh_renew_user() {
-  # Perpanjang masa aktif akun SSH dengan chage.
   print_header
-  echo "${C_BOLD}Renew SSH User${C_RESET}"
+  render_dashboard
+  
+  echo "${C_BOLD}${C_YELLOW}RENEW SSH USER${C_RESET}"
   echo
 
   local user days exp_date
   read -r -p "Username: " user
   if [[ -z "$user" ]]; then
-    echo "Username kosong."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} Username kosong."; pause; return 0
   fi
   if ! id -u "$user" >/dev/null 2>&1; then
-    echo "User tidak ditemukan."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} User tidak ditemukan."; pause; return 0
   fi
 
   read -r -p "Tambahkan masa aktif (hari): " days
   if ! [[ "$days" =~ ^[0-9]+$ ]]; then
-    echo "Hari harus angka."; pause; return 0
+    echo "${C_RED}[ERROR]${C_RESET} Hari harus angka."; pause; return 0
   fi
 
   # Ambil expiry existing, lalu tambah.
   local cur_exp
-  cur_exp="$(chage -l "$user" | awk -F: '/Account expires/{gsub(/^ +/,"",$2);print $2}')"
+  cur_exp="$(chage -l "$user" 2>/dev/null | awk -F: '/Account expires/{gsub(/^ +/,"",$2);print $2}')"
 
   if [[ "$cur_exp" == "never" || -z "$cur_exp" ]]; then
     exp_date="$(date -d "+${days} days" +%Y-%m-%d)"
@@ -131,19 +148,22 @@ ssh_renew_user() {
     exp_date="$(date -d "${cur_exp} +${days} days" +%Y-%m-%d)"
   fi
 
-  chage -E "$exp_date" "$user"
+  chage -E "$exp_date" "$user" 2>/dev/null || {
+    echo "${C_RED}[ERROR]${C_RESET} Gagal mengubah expiry."; pause; return 0
+  }
 
   echo
-  echo "${C_GREEN}[OK]${C_RESET} Expiry diupdate."
-  echo " Username : $user"
-  echo " Expired  : $exp_date"
+  echo "${C_GREEN}[OK]${C_RESET} Expiry berhasil diupdate."
+  echo " Username : ${C_CYAN}${user}${C_RESET}"
+  echo " Expired  : ${C_CYAN}${exp_date}${C_RESET}"
   pause
 }
 
 ssh_list_users() {
-  # Tampilkan list user human + expiry.
   print_header
-  echo "${C_BOLD}List SSH Users${C_RESET}"
+  render_dashboard
+  
+  echo "${C_BOLD}${C_YELLOW}LIST SSH USERS${C_RESET}"
   echo
 
   printf "%-20s %-12s\n" "USERNAME" "EXPIRES"
@@ -167,7 +187,9 @@ ssh_list_users() {
 
 ssh_show_logged_in() {
   print_header
-  echo "${C_BOLD}Logged-in Users (who)${C_RESET}"
+  render_dashboard
+  
+  echo "${C_BOLD}${C_YELLOW}LOGGED-IN USERS${C_RESET}"
   echo
   who || true
   pause
