@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# ============================================================================
+# VLESS Menu - Manajemen akun VLESS XRAY
+# ============================================================================
+
+# Source library functions
+if [[ -f /usr/bin/vpn-lib.sh ]]; then
+  # shellcheck disable=SC1091
+  source /usr/bin/vpn-lib.sh
+else
+  echo "ERROR: Library /usr/bin/vpn-lib.sh tidak ditemukan!"
+  exit 1
+fi
+
+# -----------------------------
+# Sub-menu: VLESS (XRAY)
+# -----------------------------
+# Catatan:
+# - Manajemen akun XRAY sangat tergantung pada struktur config yang dipakai
+#   (single config.json / split config / template komentar, dll).
+# - Untuk menjaga script ini aman dan portable, di bawah ini disediakan
+#   placeholder function yang bisa Anda isi sesuai installer XRAY Anda.
+
+vless_menu() {
+  local proto="VLESS"
+  while true; do
+    print_header
+    render_dashboard
+
+    cat <<EOF
+${C_BOLD}${C_YELLOW}${proto} MENU (XRAY)${C_RESET}
+
+ [1] Add ${proto} Account
+ [2] Delete ${proto} Account
+ [3] Renew ${proto} Account
+ [4] List ${proto} Accounts
+
+ [0] Back
+
+${C_DIM}Placeholder:${C_RESET}
+- Implementasikan CRUD akun dengan mengedit /etc/xray/config.json
+- Setelah perubahan, restart XRAY: systemctl restart xray
+EOF
+
+    read -r -p "Select: " opt
+    case "$opt" in
+      1|2|3|4)
+        echo
+        echo "${C_YELLOW}[TODO]${C_RESET} Implementasi ${proto} account management belum diaktifkan."
+        echo "Silakan sesuaikan dengan format config XRAY Anda."
+        pause
+        ;;
+      0) return 0 ;;
+      *) echo "Pilihan tidak valid."; pause ;;
+    esac
+  done
+}
+
+# Main entry point
+main() {
+  require_root
+  vless_menu
+}
+
+main "$@"
