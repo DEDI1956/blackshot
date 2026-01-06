@@ -60,8 +60,15 @@ ssh_add_user() {
   if [[ -z "$user" ]]; then
     echo "${C_RED}[ERROR]${C_RESET} Username kosong."; pause; return 0
   fi
+  
+  # Validasi: Jangan buat akun jika nama sudah ada
   if id -u "$user" >/dev/null 2>&1; then
     echo "${C_RED}[ERROR]${C_RESET} User sudah ada."; pause; return 0
+  fi
+  
+  # Validasi: Jangan buat akun root
+  if [[ "$user" == "root" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} Tidak dapat membuat akun root."; pause; return 0
   fi
 
   read -r -s -p "Password: " pass
@@ -102,6 +109,12 @@ ssh_delete_user() {
     echo "${C_RED}[ERROR]${C_RESET} User tidak ditemukan."; pause; return 0
   fi
 
+  # Validasi: Jangan delete akun root
+  if [[ "$user" == "root" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} Tidak dapat menghapus akun root."; pause; return 0
+  fi
+
+  # Konfirmasi sebelum delete
   echo "${C_YELLOW}[WARN]${C_RESET} User dan semua data home akan dihapus."
   read -r -p "Lanjutkan? (y/N): " yn
   if [[ "${yn,,}" != "y" ]]; then
