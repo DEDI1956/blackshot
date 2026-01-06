@@ -17,16 +17,29 @@ fi
 # Menu utama
 # -----------------------------
 print_main_menu() {
+  local ssh_status xray_status nginx_status haproxy_status
+  ssh_status="$(fmt_onoff "$(svc_is_active ssh)")"
+  xray_status="$(fmt_onoff "$(svc_is_active xray)")"
+  nginx_status="$(fmt_onoff "$(svc_is_active nginx)")"
+  haproxy_status="$(fmt_onoff "$(svc_is_active haproxy)")"
+  
   cat <<EOF
-${C_BOLD}${C_YELLOW}MAIN MENU${C_RESET}
+${C_BOLD}${C_YELLOW}VPN ALL-IN-ONE MAIN MENU${C_RESET}
 
+ SERVICE STATUS:
+   SSH      : ${ssh_status}    |    XRAY     : ${xray_status}
+   NGINX    : ${nginx_status}  |    HAPROXY  : ${haproxy_status}
+
+ MANAGEMENT MENUS:
  [01] SSH MENU
- [02] VMESS MENU
+ [02] VMESS MENU  
  [03] VLESS MENU
  [04] TROJAN MENU
  [05] AKUN NOOBZVPN
  [06] SS - LIBEV
  [07] INSTALL UDP
+
+ TOOLS & UTILITIES:
  [08] BACKUP / RESTORE
  [09] GOTO X RAM
  [10] RESTART ALL
@@ -35,12 +48,18 @@ ${C_BOLD}${C_YELLOW}MAIN MENU${C_RESET}
  [13] RUNNING SERVICE
  [14] INFO PORT
  [15] MENU BOT
- [16] CHANGE DOMAIN
- [17] FIX CERT DOMAIN
- [18] CHANGE BANNER
- [19] RESTART BANNER
- [20] SPEEDTEST
- [21] EKSTRAK MENU
+ [16] SPEEDTEST
+ [17] EKSTRAK MENU
+
+ DOMAIN & SSL:
+ [18] CHANGE DOMAIN
+ [19] RENEW SSL CERT
+ [20] VALIDATE DOMAIN
+ [21] FIX CERT DOMAIN
+
+ CUSTOMIZATION:
+ [22] CHANGE BANNER
+ [23] RESTART BANNER
 
  [00] EXIT
 EOF
@@ -594,7 +613,135 @@ EOF
 }
 
 # -----------------------------
-# Main loop input menu (while true)
+# Renew SSL Certificate
+# -----------------------------
+renew_ssl_cert_menu() {
+  print_header
+  render_dashboard
+
+  echo "${C_BOLD}${C_YELLOW}RENEW SSL CERTIFICATE${C_RESET}"
+  echo
+
+  local domain
+  domain="$(get_domain)"
+  echo "Domain saat ini: ${C_CYAN}${domain}${C_RESET}"
+  echo
+
+  if [[ "$domain" == "-" || -z "$domain" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} Domain tidak ditemukan. Set domain terlebih dahulu (menu 18)."
+    pause
+    return 0
+  fi
+
+  echo "${C_YELLOW}[INFO]${C_RESET} akan melakukan renew SSL certificate untuk domain: $domain"
+  echo "Proses ini akan:"
+  echo "  - Stop service nginx/haproxy sementara (jika berjalan)"
+  echo "  - Jalankan certbot untuk renew certificate"
+  echo "  - Copy certificate ke lokasi XRAY"
+  echo "  - Restart semua service yang diperlukan"
+  echo
+
+  read -r -p "Lanjutkan? (y/N): " yn
+  if [[ "${yn,,}" != "y" ]]; then
+    echo "Dibatalkan."; pause; return 0
+  fi
+
+  renew_ssl_cert "$domain"
+  pause
+}
+
+# -----------------------------
+# Validate Domain Resolution
+# -----------------------------
+validate_domain_menu() {
+  print_header
+  render_dashboard
+
+  echo "${C_BOLD}${C_YELLOW}VALIDATE DOMAIN RESOLUTION${C_RESET}"
+  echo
+
+  local domain vps_ip
+  domain="$(get_domain)"
+  vps_ip="$(get_public_ip)"
+  
+  echo "Domain: ${C_CYAN}${domain}${C_RESET}"
+  echo "VPS IP: ${C_CYAN}${vps_ip}${C_RESET}"
+  echo
+
+  if [[ "$domain" == "-" || -z "$domain" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} Domain tidak ditemukan. Set domain terlebih dahulu (menu 18)."
+    pause
+    return 0
+  fi
+
+  if [[ "$vps_ip" == "-" || -z "$vps_ip" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} Tidak bisa mendapatkan IP VPS."
+    pause
+    return 0
+  fi
+
+  validate_domain_resolution "$domain" "$vps_ip"
+  pause
+}
+
+# -----------------------------
+# Speedtest Menu
+# -----------------------------
+speedtest_menu() {
+  print_header
+  render_dashboard
+
+  echo "${C_BOLD}${C_YELLOW}SPEEDTEST${C_RESET}"
+  echo
+
+  if command -v speedtest-cli >/dev/null 2>&1; then
+    echo "${C_YELLOW}[INFO]${C_RESET} Menjalankan speedtest..."
+    echo
+    speedtest-cli --simple
+  elif command -v python3 >/dev/null 2>&1; then
+    echo "${C_YELLOW}[INFO]${C_RESET} speedtest-cli tidak ditemukan. Mencoba install via pip..."
+    if pip3 install speedtest-cli >/dev/null 2>&1; then
+      echo "${C_GREEN}[OK]${C_RESET} speedtest-cli berhasil diinstall."
+      echo
+      speedtest-cli --simple
+    else
+      echo "${C_RED}[ERROR]${C_RESET} Gagal install speedtest-cli."
+      echo "Install manual: pip3 install speedtest-cli"
+    fi
+  else
+    echo "${C_RED}[ERROR]${C_RESET} python3 tidak ditemukan. Tidak bisa install speedtest-cli."
+  fi
+
+  pause
+}
+
+# -----------------------------
+# Restart Banner Menu  
+# -----------------------------
+restart_banner_menu() {
+  print_header
+  render_dashboard
+
+  echo "${C_BOLD}${C_YELLOW}RESTART BANNER${C_RESET}"
+  echo
+
+  local file="/etc/issue.net"
+  if [[ ! -f "$file" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} File banner tidak ditemukan: $file"
+    echo "Gunakan menu 22 untuk membuat banner terlebih dahulu."
+    pause
+    return 0
+  fi
+
+  echo "Restarting SSH service untuk apply banner..."
+  svc_restart_if_exists ssh
+  svc_restart_if_exists sshd
+
+  echo
+  echo "${C_GREEN}[OK]${C_RESET} Banner SSH telah di-restart."
+  echo "Banner tersimpan di: $file"
+  pause
+}
 # -----------------------------
 main() {
   require_root
@@ -650,18 +797,20 @@ main() {
       13) running_service_menu ;;
       14) info_port_menu ;;
       15) menu_bot_menu ;;
-      16) change_domain_menu ;;
-      17) fix_cert_domain_menu ;;
-      18) change_banner_menu ;;
-      19) restart_banner_menu ;;
-      20) speedtest_menu ;;
-      21) ekstrak_menu ;;
+      16) speedtest_menu ;;
+      17) ekstrak_menu ;;
+      18) change_domain_menu ;;
+      19) renew_ssl_cert_menu ;;
+      20) validate_domain_menu ;;
+      21) fix_cert_domain_menu ;;
+      22) change_banner_menu ;;
+      23) restart_banner_menu ;;
       0|00)
         echo "Keluar..."
         exit 0
         ;;
       *)
-        echo "Pilihan tidak valid.";
+        echo "${C_RED}[ERROR]${C_RESET} Pilihan tidak valid."
         pause
         ;;
     esac

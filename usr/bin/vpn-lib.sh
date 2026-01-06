@@ -317,6 +317,103 @@ get_services_status() {
 }
 
 # -----------------------------
+# Domain validation & SSL functions
+# -----------------------------
+validate_domain_resolution() {
+  local domain="$1"
+  local vps_ip="$2"
+  
+  if ! command -v nslookup >/dev/null 2>&1; then
+    echo "${C_YELLOW}[WARN]${C_RESET} nslookup tidak ditemukan, install dnsutils untuk validasi DNS."
+    return 1
+  fi
+  
+  local resolved_ip
+  resolved_ip="$(nslookup "$domain" 2>/dev/null | grep -A1 "Name:" | grep "Address:" | awk '{print $2}' | tail -1)"
+  
+  if [[ -z "$resolved_ip" ]]; then
+    echo "${C_RED}[ERROR]${C_RESET} Domain $domain tidak resolve ke IP manapun."
+    return 1
+  fi
+  
+  if [[ "$resolved_ip" != "$vps_ip" ]]; then
+    echo "${C_YELLOW}[WARN]${C_RESET} Domain $domain resolve ke $resolved_ip, tapi VPS IP adalah $vps_ip"
+    echo "${C_YELLOW}[WARN]${C_RESET} Pastikan DNS domain mengarah ke IP VPS yang benar."
+    return 1
+  fi
+  
+  echo "${C_GREEN}[OK]${C_RESET} Domain $domain resolve correctly ke $vps_ip"
+  return 0
+}
+
+renew_ssl_cert() {
+  local domain="$1"
+  
+  echo "${C_BOLD}Renew SSL Certificate${C_RESET}"
+  echo "Domain: ${C_CYAN}${domain}${C_RESET}"
+  echo
+  
+  if ! command -v certbot >/dev/null 2>&1; then
+    echo "${C_RED}[ERROR]${C_RESET} certbot tidak ditemukan."
+    echo "Install dengan: apt update && apt install -y certbot"
+    return 1
+  fi
+  
+  # Cek apakah service nginx/haproxy berjalan, jika ya stop sementara
+  local nginx_active haproxy_active
+  nginx_active="$(svc_is_active nginx)"
+  haproxy_active="$(svc_is_active haproxy)"
+  
+  if [[ "$nginx_active" == "ON" ]]; then
+    echo "${C_YELLOW}[INFO]${C_RESET} Stopping NGINX untuk certbot standalone..."
+    systemctl stop nginx
+  fi
+  
+  if [[ "$haproxy_active" == "ON" ]]; then
+    echo "${C_YELLOW}[INFO]${C_RESET} Stopping HAPROXY untuk certbot standalone..."
+    systemctl stop haproxy
+  fi
+  
+  echo "${C_YELLOW}[INFO]${C_RESET} Mencoba renew certificate untuk $domain..."
+  
+  if certbot certonly --standalone --non-interactive --agree-tos --email admin@"$domain" -d "$domain"; then
+    echo "${C_GREEN}[OK]${C_RESET} Certificate berhasil di-renew."
+    
+    # Copy certificate ke lokasi XRAY jika diperlukan
+    if [[ -f "/etc/letsencrypt/live/$domain/fullchain.pem" ]]; then
+      cp "/etc/letsencrypt/live/$domain/fullchain.pem" /etc/xray/xray.crt 2>/dev/null || true
+      cp "/etc/letsencrypt/live/$domain/privkey.pem" /etc/xray/xray.key 2>/dev/null || true
+      echo "${C_GREEN}[OK]${C_RESET} Certificate copied to XRAY location."
+    fi
+    
+    # Restart services
+    svc_restart_if_exists xray
+    if [[ "$nginx_active" == "ON" ]]; then
+      systemctl start nginx
+      echo "${C_GREEN}[OK]${C_RESET} NGINX restarted."
+    fi
+    if [[ "$haproxy_active" == "ON" ]]; then
+      systemctl start haproxy
+      echo "${C_GREEN}[OK]${C_RESET} HAPROXY restarted."
+    fi
+    
+    return 0
+  else
+    echo "${C_RED}[ERROR]${C_RESET} Gagal renew certificate."
+    
+    # Restart services kembali
+    if [[ "$nginx_active" == "ON" ]]; then
+      systemctl start nginx
+    fi
+    if [[ "$haproxy_active" == "ON" ]]; then
+      systemctl start haproxy
+    fi
+    
+    return 1
+  fi
+}
+
+# -----------------------------
 # Dashboard renderer
 # -----------------------------
 render_dashboard() {
