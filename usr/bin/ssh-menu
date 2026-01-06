@@ -1,0 +1,182 @@
+#!/usr/bin/env bash
+# ============================================================================
+# SSH Menu - Manajemen akun SSH
+# ============================================================================
+
+# Source library functions
+if [[ -f /usr/bin/vpn-lib.sh ]]; then
+  # shellcheck disable=SC1091
+  source /usr/bin/vpn-lib.sh
+else
+  echo "ERROR: Library /usr/bin/vpn-lib.sh tidak ditemukan!"
+  exit 1
+fi
+
+# -----------------------------
+# Sub-menu: SSH
+# -----------------------------
+ssh_menu() {
+  while true; do
+    print_header
+    render_dashboard
+
+    cat <<EOF
+${C_BOLD}${C_YELLOW}SSH MENU${C_RESET}
+
+ [1] Add SSH User
+ [2] Delete SSH User
+ [3] Renew SSH User (Extend Expiry)
+ [4] List SSH Users
+ [5] Show Logged-in Users (who)
+
+ [0] Back
+EOF
+
+    read -r -p "Select: " opt
+    case "$opt" in
+      1) ssh_add_user ;;
+      2) ssh_delete_user ;;
+      3) ssh_renew_user ;;
+      4) ssh_list_users ;;
+      5) ssh_show_logged_in ;;
+      0) return 0 ;;
+      *) echo "Pilihan tidak valid."; pause ;;
+    esac
+  done
+}
+
+ssh_add_user() {
+  # Menambah akun SSH Linux standar (tanpa mengubah konfigurasi daemon).
+  print_header
+  echo "${C_BOLD}Add SSH User${C_RESET}"
+  echo
+
+  local user pass days exp_date
+  read -r -p "Username: " user
+  if [[ -z "$user" ]]; then
+    echo "Username kosong."; pause; return 0
+  fi
+  if id -u "$user" >/dev/null 2>&1; then
+    echo "User sudah ada."; pause; return 0
+  fi
+
+  read -r -s -p "Password: " pass
+  echo
+  read -r -p "Masa aktif (hari): " days
+  if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+    echo "Hari harus angka."; pause; return 0
+  fi
+
+  exp_date="$(date -d "+${days} days" +%Y-%m-%d)"
+
+  useradd -m -s /bin/bash -e "$exp_date" "$user"
+  echo "${user}:${pass}" | chpasswd
+
+  echo
+  echo "${C_GREEN}[OK]${C_RESET} User dibuat."
+  echo " Username : $user"
+  echo " Expired  : $exp_date"
+  pause
+}
+
+ssh_delete_user() {
+  # Menghapus akun SSH.
+  print_header
+  echo "${C_BOLD}Delete SSH User${C_RESET}"
+  echo
+
+  local user
+  read -r -p "Username: " user
+  if [[ -z "$user" ]]; then
+    echo "Username kosong."; pause; return 0
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    echo "User tidak ditemukan."; pause; return 0
+  fi
+
+  userdel -r "$user" 2>/dev/null || userdel "$user"
+
+  echo
+  echo "${C_GREEN}[OK]${C_RESET} User dihapus: $user"
+  pause
+}
+
+ssh_renew_user() {
+  # Perpanjang masa aktif akun SSH dengan chage.
+  print_header
+  echo "${C_BOLD}Renew SSH User${C_RESET}"
+  echo
+
+  local user days exp_date
+  read -r -p "Username: " user
+  if [[ -z "$user" ]]; then
+    echo "Username kosong."; pause; return 0
+  fi
+  if ! id -u "$user" >/dev/null 2>&1; then
+    echo "User tidak ditemukan."; pause; return 0
+  fi
+
+  read -r -p "Tambahkan masa aktif (hari): " days
+  if ! [[ "$days" =~ ^[0-9]+$ ]]; then
+    echo "Hari harus angka."; pause; return 0
+  fi
+
+  # Ambil expiry existing, lalu tambah.
+  local cur_exp
+  cur_exp="$(chage -l "$user" | awk -F: '/Account expires/{gsub(/^ +/,"",$2);print $2}')"
+
+  if [[ "$cur_exp" == "never" || -z "$cur_exp" ]]; then
+    exp_date="$(date -d "+${days} days" +%Y-%m-%d)"
+  else
+    exp_date="$(date -d "${cur_exp} +${days} days" +%Y-%m-%d)"
+  fi
+
+  chage -E "$exp_date" "$user"
+
+  echo
+  echo "${C_GREEN}[OK]${C_RESET} Expiry diupdate."
+  echo " Username : $user"
+  echo " Expired  : $exp_date"
+  pause
+}
+
+ssh_list_users() {
+  # Tampilkan list user human + expiry.
+  print_header
+  echo "${C_BOLD}List SSH Users${C_RESET}"
+  echo
+
+  printf "%-20s %-12s\n" "USERNAME" "EXPIRES"
+  printf "%-20s %-12s\n" "--------" "-------"
+
+  # Ambil user human dari /etc/passwd.
+  while IFS=: read -r uname _ uid _ _ _ shell; do
+    [[ "$uid" -ge 1000 ]] || continue
+    [[ "$uname" != "nobody" ]] || continue
+    [[ "$shell" =~ (nologin|false)$ ]] && continue
+
+    # Expiry via chage.
+    local exp
+    exp="$(chage -l "$uname" 2>/dev/null | awk -F: '/Account expires/{gsub(/^ +/,"",$2);print $2}')"
+    [[ -n "$exp" ]] || exp="-"
+    printf "%-20s %-12s\n" "$uname" "$exp"
+  done < /etc/passwd
+
+  pause
+}
+
+ssh_show_logged_in() {
+  print_header
+  echo "${C_BOLD}Logged-in Users (who)${C_RESET}"
+  echo
+  who || true
+  pause
+}
+
+# Main entry point
+main() {
+  require_root
+  ssh_menu
+}
+
+main "$@"
