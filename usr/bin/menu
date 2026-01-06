@@ -278,7 +278,65 @@ do_restore() {
     echo "Dibatalkan."; pause; return 0
   fi
 
-  tar -xzf "$file" -C / 2>/dev/null || true
+  # Ekstrak backup ke temporary directory
+  local temp_restore="/tmp/restore_$(date +%Y%m%d-%H%M%S)"
+  mkdir -p "$temp_restore"
+  tar -xzf "$file" -C "$temp_restore" 2>/dev/null || {
+    echo "${C_RED}[ERROR]${C_RESET} Gagal mengekstrak file backup."
+    rm -rf "$temp_restore"
+    pause
+    return 1
+  }
+
+  # Restore Xray config
+  if [[ -d "$temp_restore/etc/xray" ]]; then
+    cp -r "$temp_restore/etc/xray" /etc/
+    echo "${C_GREEN}[OK]${C_RESET} Xray config restored"
+  elif [[ -d "$temp_restore/usr/local/etc/xray" ]]; then
+    cp -r "$temp_restore/usr/local/etc/xray" /usr/local/etc/
+    echo "${C_GREEN}[OK]${C_RESET} Xray config restored"
+  fi
+
+  # Restore SSH accounts
+  if [[ -d "$temp_restore/tmp/ssh_backup_*" ]]; then
+    local ssh_backup_dir=$(find "$temp_restore/tmp" -name "ssh_backup_*" -type d | head -1)
+    if [[ -n "$ssh_backup_dir" ]]; then
+      # Validasi: Jangan restore jika akan menimpa akun root atau membuat duplicate
+      while IFS=: read -r uname _ uid _ _ _ shell; do
+        [[ "$uid" -ge 1000 ]] || continue
+        [[ "$uname" != "nobody" ]] || continue
+        [[ "$shell" =~ (nologin|false)$ ]] && continue
+        
+        # Skip root user
+        if [[ "$uname" == "root" ]]; then
+          continue
+        fi
+        
+        # Cek duplicate
+        if id -u "$uname" >/dev/null 2>&1; then
+          echo "${C_YELLOW}[WARN]${C_RESET} Akun $uname sudah ada, skip restore."
+          continue
+        fi
+      done < "$ssh_backup_dir/passwd"
+      
+      # Restore SSH files
+      cp "$ssh_backup_dir/passwd" /etc/passwd
+      cp "$ssh_backup_dir/shadow" /etc/shadow
+      cp "$ssh_backup_dir/group" /etc/group
+      echo "${C_GREEN}[OK]${C_RESET} SSH accounts restored"
+      
+      # Restore home directories
+      local home_backup_dir=$(find "$temp_restore/tmp" -name "home_backup_*" -type d | head -1)
+      if [[ -n "$home_backup_dir" ]]; then
+        cp -r "$home_backup_dir"/* /home/
+        chown -R --reference=/home /home
+        echo "${C_GREEN}[OK]${C_RESET} Home directories restored"
+      fi
+    fi
+  fi
+
+  # Bersihkan temporary files
+  rm -rf "$temp_restore"
 
   echo
   echo "${C_GREEN}[OK]${C_RESET} Restore selesai."
